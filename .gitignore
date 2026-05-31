@@ -2,18 +2,30 @@
 
 # dependencies
 /node_modules
+**/node_modules
 /.pnp
 .pnp.js
 
 # testing
 /coverage
+**/coverage
+
+# python
+__pycache__/
+**/__pycache__/
+*.py[cod]
+.venv/
+**/.venv/
 
 # next.js
 /.next/
+**/.next/
 /out/
+**/out/
 
 # production
 /build
+**/build
 
 # misc
 .DS_Store
@@ -27,6 +39,8 @@ yarn-error.log*
 # local env files
 .env*.local
 .env
+**/.env
+!**/.env.example
 
 # vercel
 .vercel
