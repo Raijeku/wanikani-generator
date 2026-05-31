@@ -106,3 +106,23 @@ Then open `http://localhost:3000`.
 - WaniKani API token: enter it in the frontend input. The browser sends it to the local FastAPI backend to fetch your WaniKani profile and vocabulary.
 
 For a production deployment, move WaniKani token handling to a real authentication/session flow instead of sending raw tokens from the browser.
+
+## Vercel Deployment
+
+This repo includes a root `vercel.json` for Vercel Services:
+
+- Frontend service: `frontend/` at `/`
+- Backend service: `backend/` at `/_/backend`
+
+In Vercel, import the private GitHub repo as a Services project and keep the detected roots/prefixes.
+
+Set these Vercel environment variables:
+
+```text
+OPENAI_API_KEY=your_openai_api_key_here
+OPENAI_MODEL=gpt-5.2
+FRONTEND_ORIGIN=https://your-vercel-app.vercel.app
+NEXT_PUBLIC_API_BASE_URL=/_/backend
+```
+
+After the first deploy, replace `FRONTEND_ORIGIN` with the actual Vercel production URL.
