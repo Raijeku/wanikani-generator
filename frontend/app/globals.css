@@ -393,7 +393,8 @@ select {
 .sentenceReader {
   display: flex;
   flex-wrap: wrap;
-  align-items: flex-end;
+  align-items: baseline;
+  align-content: center;
   row-gap: 22px;
   column-gap: 2px;
   min-height: 156px;
@@ -631,7 +632,7 @@ select {
   }
 
   .sentenceReader {
-    min-height: 138px;
+    min-height: auto;
     padding-inline: 4px;
   }
 
