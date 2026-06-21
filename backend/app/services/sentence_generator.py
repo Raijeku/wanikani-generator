@@ -11,11 +11,13 @@ DEFAULT_UNKNOWN_PERCENTAGE = 20
 
 
 async def generate_sentences(request: GenerateSentencesRequest) -> GenerateSentencesResponse:
-    known_vocabulary = [item for item in request.vocabulary if item.wk_level <= request.max_level]
+    connectors = [item for item in request.vocabulary if item.item_type == "connector"]
+    real_vocabulary = [item for item in request.vocabulary if item.item_type != "connector"]
+    known_vocabulary = [item for item in real_vocabulary if item.wk_level <= request.max_level]
     unknown_limit = min(request.max_level + request.unknown_levels_ahead, 60)
     unknown_vocabulary = [
         item
-        for item in request.vocabulary
+        for item in real_vocabulary
         if request.max_level < item.wk_level <= unknown_limit
     ]
 
@@ -29,6 +31,7 @@ async def generate_sentences(request: GenerateSentencesRequest) -> GenerateSente
                 request=request,
                 known_vocabulary=known_vocabulary,
                 unknown_vocabulary=unknown_vocabulary,
+                connectors=connectors,
                 api_key=settings.openai_api_key,
                 model=settings.openai_model,
             )
@@ -50,6 +53,7 @@ def _generate_with_openai(
     request: GenerateSentencesRequest,
     known_vocabulary: list[VocabularyItem],
     unknown_vocabulary: list[VocabularyItem],
+    connectors: list[VocabularyItem],
     api_key: str,
     model: str,
 ) -> list[Sentence]:
@@ -68,7 +72,7 @@ def _generate_with_openai(
     prompt = {
         "task": "Generate Japanese study sentences.",
         "rules": [
-            "Use only the provided WaniKani vocabulary plus common Japanese particles and endings.",
+            "Use only the provided WaniKani vocabulary, selected connectors, common Japanese particles, and endings.",
             "Do not introduce content words that are not in the vocabulary lists.",
             "Write sentences that a learner could actually use or understand in a normal situation.",
             "Do not merely list random vocabulary words together.",
@@ -79,7 +83,7 @@ def _generate_with_openai(
             "Long and story items must contain at least two connected Japanese sentences, each ending with 。",
             "Return strict JSON with a top-level 'sentences' array.",
             "Every token must include text, reading, meaning, kind, is_unknown, and wk_level for vocabulary.",
-            "Allowed token kinds are vocabulary, particle, ending.",
+            "Allowed token kinds are vocabulary, connector, particle, ending.",
             "Set is_unknown to true only for words from the unknown vocabulary list.",
             f"If unknown vocabulary is enabled, keep unknown words to a small minority of vocabulary tokens, around {request.unknown_percentage} percent.",
             "If unknown_levels_ahead is 0, do not use any unknown vocabulary.",
@@ -90,6 +94,7 @@ def _generate_with_openai(
         "unknown_levels_ahead": request.unknown_levels_ahead,
         "known_vocabulary": [item.model_dump() for item in known_sample],
         "unknown_vocabulary": [item.model_dump() for item in unknown_sample],
+        "selected_connectors": [item.model_dump() for item in connectors],
         "shape": {
             "sentences": [
                 {

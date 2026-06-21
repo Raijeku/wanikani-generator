@@ -8,6 +8,11 @@ class VocabularyItem(BaseModel):
     reading: str
     meaning: str
     wk_level: int = Field(alias="wk_level")
+    subject_id: int | None = None
+    srs_stage: int | None = None
+    srs_category: str = "connector"
+    item_type: Literal["vocabulary", "connector"] = "vocabulary"
+    examples: list[str] = Field(default_factory=list)
 
 
 class Token(BaseModel):
@@ -49,4 +54,22 @@ class GenerateSentencesRequest(BaseModel):
 
 class GenerateSentencesResponse(BaseModel):
     sentences: list[Sentence]
+    used_ai: bool
+
+
+class RecommendationRequest(BaseModel):
+    max_level: int = Field(default=1, ge=1, le=60)
+    vocabulary: list[VocabularyItem]
+
+
+class RecommendationItem(BaseModel):
+    title: str
+    media_type: str
+    reason: str
+    level_note: str
+    free_resource_url: str | None = None
+
+
+class RecommendationResponse(BaseModel):
+    recommendations: list[RecommendationItem]
     used_ai: bool

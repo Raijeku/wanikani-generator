@@ -5,9 +5,12 @@ from app.config import get_settings
 from app.models import (
     GenerateSentencesRequest,
     GenerateSentencesResponse,
+    RecommendationRequest,
+    RecommendationResponse,
     WaniKaniProfileRequest,
     WaniKaniProfileResponse,
 )
+from app.services.recommendations import recommend_media
 from app.services.sentence_generator import generate_sentences
 from app.services.wanikani import fetch_profile
 
@@ -38,3 +41,8 @@ async def wanikani_profile(request: WaniKaniProfileRequest) -> WaniKaniProfileRe
 @app.post("/api/sentences/generate", response_model=GenerateSentencesResponse)
 async def sentence_generation(request: GenerateSentencesRequest) -> GenerateSentencesResponse:
     return await generate_sentences(request)
+
+
+@app.post("/api/recommendations", response_model=RecommendationResponse)
+async def recommendations(request: RecommendationRequest) -> RecommendationResponse:
+    return await recommend_media(request)

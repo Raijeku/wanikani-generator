@@ -1,15 +1,25 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   BookOpen,
+  Check,
   Eye,
+  Flame,
+  GraduationCap,
   Headphones,
   KeyRound,
+  Layers3,
   Loader2,
+  Lock,
+  Medal,
   RefreshCcw,
+  ScrollText,
+  Search,
   SlidersHorizontal,
+  Sparkles,
   Volume2,
+  X,
 } from "lucide-react";
 
 type Token = {
@@ -18,7 +28,7 @@ type Token = {
   meaning: string;
   wk_level?: number;
   is_unknown?: boolean;
-  kind: "vocabulary" | "particle" | "ending";
+  kind: "vocabulary" | "connector" | "particle" | "ending";
 };
 
 type Sentence = {
@@ -34,6 +44,11 @@ type VocabularyItem = {
   reading: string;
   meaning: string;
   wk_level: number;
+  subject_id?: number;
+  srs_stage?: number;
+  srs_category: SrsCategory;
+  item_type: "vocabulary" | "connector";
+  examples: string[];
 };
 
 type WaniKaniProfile = {
@@ -43,8 +58,18 @@ type WaniKaniProfile = {
   vocabulary: VocabularyItem[];
 };
 
+type RecommendationItem = {
+  title: string;
+  media_type: string;
+  reason: string;
+  level_note: string;
+  free_resource_url?: string | null;
+};
+
 type SentenceStyle = "short" | "medium" | "long" | "story";
 type SentenceCache = Partial<Record<SentenceStyle, Sentence[]>>;
+type ViewMode = "sentences" | "vocabulary";
+type SrsCategory = "connector" | "locked" | "apprentice" | "guru" | "master" | "enlightened" | "burned";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 const WANIKANI_KEY_STORAGE_KEY = "wanikani-generator:wanikani-key";
@@ -55,21 +80,57 @@ const sentenceStyleOptions: { value: SentenceStyle; label: string }[] = [
   { value: "long", label: "Long" },
   { value: "story", label: "Story" },
 ];
+const srsFilters: { value: SrsCategory; label: string; icon: typeof Check }[] = [
+  { value: "connector", label: "Connectors", icon: Layers3 },
+  { value: "locked", label: "Locked", icon: Lock },
+  { value: "apprentice", label: "Apprentice", icon: GraduationCap },
+  { value: "guru", label: "Guru", icon: Sparkles },
+  { value: "master", label: "Master", icon: Medal },
+  { value: "enlightened", label: "Enlightened", icon: ScrollText },
+  { value: "burned", label: "Burned", icon: Flame },
+];
 
 export default function Home() {
+  const [viewMode, setViewMode] = useState<ViewMode>("sentences");
   const [level, setLevel] = useState(12);
   const [sentenceCount, setSentenceCount] = useState<(typeof sentenceCountOptions)[number]>(5);
   const [sentenceStyle, setSentenceStyle] = useState<SentenceStyle>("short");
   const [unknownLevelsAhead, setUnknownLevelsAhead] = useState(0);
+  const [sampleSize, setSampleSize] = useState(80);
+  const [activeSrsFilters, setActiveSrsFilters] = useState<Set<SrsCategory>>(
+    new Set(srsFilters.map((filter) => filter.value)),
+  );
+  const [selectedWords, setSelectedWords] = useState<Set<string>>(new Set());
   const [showReadings, setShowReadings] = useState(true);
   const [revealedTranslations, setRevealedTranslations] = useState<Set<number>>(new Set());
   const [audioState, setAudioState] = useState<"idle" | "speaking">("idle");
   const [waniKaniKey, setWaniKaniKey] = useState("");
   const [profile, setProfile] = useState<WaniKaniProfile | null>(null);
   const [sentencesByStyle, setSentencesByStyle] = useState<SentenceCache>({});
+  const [recommendations, setRecommendations] = useState<RecommendationItem[]>([]);
+  const [showRecommendations, setShowRecommendations] = useState(false);
   const [status, setStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [message, setMessage] = useState("Load WaniKani first, then generate AI sentences.");
   const sentences = sentencesByStyle[sentenceStyle] ?? [];
+
+  const availableVocabulary = useMemo(() => {
+    if (!profile) {
+      return [];
+    }
+
+    return profile.vocabulary.filter((item) => item.wk_level <= level + unknownLevelsAhead || item.item_type === "connector");
+  }, [level, profile, unknownLevelsAhead]);
+
+  const visibleVocabulary = useMemo(() => {
+    const filtered = availableVocabulary.filter((item) => activeSrsFilters.has(item.srs_category));
+    const connectors = filtered.filter((item) => item.item_type === "connector");
+    const words = filtered.filter((item) => item.item_type !== "connector").slice(0, sampleSize);
+    return [...connectors, ...words];
+  }, [activeSrsFilters, availableVocabulary, sampleSize]);
+
+  const selectedVocabulary = useMemo(() => {
+    return availableVocabulary.filter((item) => selectedWords.has(item.text));
+  }, [availableVocabulary, selectedWords]);
 
   useEffect(() => {
     const savedKey = window.localStorage.getItem(WANIKANI_KEY_STORAGE_KEY);
@@ -96,7 +157,7 @@ export default function Home() {
     }
 
     setStatus("loading");
-    setMessage("Fetching your WaniKani level and vocabulary...");
+    setMessage("Fetching your WaniKani level, vocabulary, SRS stages, and examples...");
 
     try {
       const response = await fetch(`${API_BASE_URL}/api/wanikani/profile`, {
@@ -113,6 +174,8 @@ export default function Home() {
       window.localStorage.setItem(WANIKANI_KEY_STORAGE_KEY, apiKey);
       setProfile(body);
       setLevel(body.level);
+      setSampleSize(Math.min(120, Math.max(30, body.vocabulary_count)));
+      setSelectedWords(new Set(body.vocabulary.map((item) => item.text)));
       setSentencesByStyle({});
       setRevealedTranslations(new Set());
       setStatus("ready");
@@ -130,8 +193,14 @@ export default function Home() {
       return;
     }
 
+    if (selectedVocabulary.length === 0) {
+      setStatus("error");
+      setMessage("Select at least one vocabulary item first.");
+      return;
+    }
+
     setStatus("loading");
-    setMessage("Generating Japanese sentences with your WaniKani vocabulary...");
+    setMessage("Generating Japanese sentences with selected vocabulary...");
     setRevealedTranslations(new Set());
 
     try {
@@ -143,7 +212,7 @@ export default function Home() {
           max_level: level,
           sentence_style: sentenceStyle,
           unknown_levels_ahead: unknownLevelsAhead,
-          vocabulary: profile.vocabulary,
+          vocabulary: selectedVocabulary,
         }),
       });
 
@@ -156,11 +225,47 @@ export default function Home() {
         ...current,
         [sentenceStyle]: body.sentences,
       }));
+      setViewMode("sentences");
       setStatus("ready");
       setMessage(body.used_ai ? "Generated with OpenAI." : "Generated with the local fallback generator.");
     } catch (error) {
       setStatus("error");
       setMessage(error instanceof Error ? error.message : "Could not generate sentences.");
+    }
+  }
+
+  async function getRecommendations() {
+    if (!profile || selectedVocabulary.length === 0) {
+      setStatus("error");
+      setMessage("Load WaniKani and select vocabulary before requesting recommendations.");
+      return;
+    }
+
+    setStatus("loading");
+    setMessage("Finding media recommendations for the selected vocabulary...");
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/recommendations`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          max_level: level,
+          vocabulary: selectedVocabulary,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(await readError(response, "Could not get recommendations."));
+      }
+
+      const body = (await response.json()) as { recommendations: RecommendationItem[]; used_ai: boolean };
+      setRecommendations(body.recommendations);
+      setShowRecommendations(true);
+      setStatus("ready");
+      setMessage(body.used_ai ? "Recommendations generated with OpenAI." : "Showing curated recommendations.");
+    } catch (error) {
+      setStatus("error");
+      setMessage(error instanceof Error ? error.message : "Could not get recommendations.");
     }
   }
 
@@ -171,6 +276,44 @@ export default function Home() {
         next.delete(sentenceId);
       } else {
         next.add(sentenceId);
+      }
+      return next;
+    });
+  }
+
+  function toggleSrsFilter(category: SrsCategory) {
+    setActiveSrsFilters((current) => {
+      const next = new Set(current);
+      if (next.has(category)) {
+        next.delete(category);
+      } else {
+        next.add(category);
+      }
+      return next;
+    });
+  }
+
+  function toggleWord(text: string) {
+    setSelectedWords((current) => {
+      const next = new Set(current);
+      if (next.has(text)) {
+        next.delete(text);
+      } else {
+        next.add(text);
+      }
+      return next;
+    });
+  }
+
+  function selectVisibleWords(selected: boolean) {
+    setSelectedWords((current) => {
+      const next = new Set(current);
+      for (const item of visibleVocabulary) {
+        if (selected) {
+          next.add(item.text);
+        } else {
+          next.delete(item.text);
+        }
       }
       return next;
     });
@@ -320,10 +463,15 @@ export default function Home() {
             <span>Generate</span>
           </button>
 
+          <button className="secondaryButton wideButton" type="button" onClick={getRecommendations}>
+            <Search size={18} aria-hidden="true" />
+            <span>Recommend Media</span>
+          </button>
+
           <div className="statsGrid">
             <div>
-              <span>Vocabulary</span>
-              <strong>{profile?.vocabulary_count ?? 0}</strong>
+              <span>Selected</span>
+              <strong>{selectedVocabulary.length}</strong>
             </div>
             <div>
               <span>Profile</span>
@@ -333,52 +481,265 @@ export default function Home() {
         </aside>
 
         <section className="practiceSurface" aria-live="polite">
-          {sentences.length > 0 ? (
-            <>
-              <div className="sentenceToolbar">
-                <div>
-                  <span className="eyebrow">
-                    {profile ? `${profile.username} · level ${profile.level}` : "No profile loaded"}
-                  </span>
-                  <h2>Generated sentences</h2>
-                </div>
-                <button
-                  className="iconButton"
-                  type="button"
-                  onClick={generateSentences}
-                  aria-label="Generate another sentence set"
-                  title="Generate another sentence set"
-                >
-                  <RefreshCcw size={19} aria-hidden="true" />
-                </button>
-              </div>
+          <div className="viewTabs" role="tablist" aria-label="Practice views">
+            <button
+              className={viewMode === "sentences" ? "selected" : ""}
+              type="button"
+              onClick={() => setViewMode("sentences")}
+            >
+              Sentences
+            </button>
+            <button
+              className={viewMode === "vocabulary" ? "selected" : ""}
+              type="button"
+              onClick={() => setViewMode("vocabulary")}
+            >
+              Vocabulary
+            </button>
+          </div>
 
-              <div className="sentenceStack">
-                {sentences.map((sentence) => (
-                  <SentenceBlock
-                    key={sentence.id}
-                    audioState={audioState}
-                    showUnknownWords={unknownLevelsAhead > 0}
-                    isTranslationRevealed={revealedTranslations.has(sentence.id)}
-                    level={level}
-                    sentence={sentence}
-                    showReadings={showReadings}
-                    onSpeakSentence={speakSentence}
-                    onSpeakText={speakText}
-                    onToggleTranslation={toggleSentenceTranslation}
-                  />
-                ))}
-              </div>
-            </>
+          {viewMode === "vocabulary" ? (
+            <VocabularyView
+              activeSrsFilters={activeSrsFilters}
+              sampleSize={sampleSize}
+              selectedWords={selectedWords}
+              vocabulary={visibleVocabulary}
+              totalVocabulary={availableVocabulary.length}
+              onSampleSizeChange={setSampleSize}
+              onSelectVisible={selectVisibleWords}
+              onToggleSrsFilter={toggleSrsFilter}
+              onToggleWord={toggleWord}
+            />
           ) : (
-            <div className="emptyState">
-              <h2>No sentences yet</h2>
-              <p>Load your WaniKani vocabulary, choose the settings, and generate a set.</p>
-            </div>
+            <SentenceView
+              audioState={audioState}
+              level={level}
+              profile={profile}
+              revealedTranslations={revealedTranslations}
+              sentences={sentences}
+              showReadings={showReadings}
+              showUnknownWords={unknownLevelsAhead > 0}
+              onGenerate={generateSentences}
+              onSpeakSentence={speakSentence}
+              onSpeakText={speakText}
+              onToggleTranslation={toggleSentenceTranslation}
+            />
           )}
         </section>
       </section>
+
+      {showRecommendations ? (
+        <RecommendationsModal recommendations={recommendations} onClose={() => setShowRecommendations(false)} />
+      ) : null}
     </main>
+  );
+}
+
+function VocabularyView({
+  activeSrsFilters,
+  sampleSize,
+  selectedWords,
+  vocabulary,
+  totalVocabulary,
+  onSampleSizeChange,
+  onSelectVisible,
+  onToggleSrsFilter,
+  onToggleWord,
+}: {
+  activeSrsFilters: Set<SrsCategory>;
+  sampleSize: number;
+  selectedWords: Set<string>;
+  vocabulary: VocabularyItem[];
+  totalVocabulary: number;
+  onSampleSizeChange: (size: number) => void;
+  onSelectVisible: (selected: boolean) => void;
+  onToggleSrsFilter: (category: SrsCategory) => void;
+  onToggleWord: (text: string) => void;
+}) {
+  return (
+    <div className="vocabularyView">
+      <div className="sentenceToolbar">
+        <div>
+          <span className="eyebrow">Vocabulary selection</span>
+          <h2>Words for generation</h2>
+        </div>
+        <div className="toolbarActions">
+          <button className="secondaryButton compact" type="button" onClick={() => onSelectVisible(true)}>
+            <Check size={16} aria-hidden="true" />
+            <span>Select visible</span>
+          </button>
+          <button className="secondaryButton compact" type="button" onClick={() => onSelectVisible(false)}>
+            <X size={16} aria-hidden="true" />
+            <span>Clear visible</span>
+          </button>
+        </div>
+      </div>
+
+      <div className="srsFilterBar" aria-label="SRS filters">
+        {srsFilters.map((filter) => {
+          const Icon = filter.icon;
+          return (
+            <button
+              className={`${filter.value} ${activeSrsFilters.has(filter.value) ? "selected" : ""}`}
+              key={filter.value}
+              type="button"
+              onClick={() => onToggleSrsFilter(filter.value)}
+            >
+              <Icon size={15} aria-hidden="true" />
+              <span>{filter.label}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="sampleControl">
+        <div className="controlLabel">
+          <SlidersHorizontal size={16} aria-hidden="true" />
+          <span>Sample words kept</span>
+          <strong>{sampleSize}</strong>
+        </div>
+        <input
+          aria-label="Sample words kept"
+          type="range"
+          min="10"
+          max={Math.max(10, totalVocabulary)}
+          step="5"
+          value={Math.min(sampleSize, Math.max(10, totalVocabulary))}
+          onChange={(event) => onSampleSizeChange(Number(event.target.value))}
+        />
+      </div>
+
+      <div className="vocabularyGrid">
+        {vocabulary.map((item) => (
+          <button
+            className={`vocabularyCard ${item.srs_category} ${selectedWords.has(item.text) ? "selected" : ""}`}
+            key={`${item.item_type}-${item.text}`}
+            type="button"
+            onClick={() => onToggleWord(item.text)}
+          >
+            <span className="checkMark">{selectedWords.has(item.text) ? "✓" : ""}</span>
+            <span className="vocabText">{item.text}</span>
+            <span className="vocabReading">{item.reading}</span>
+            <strong>{item.meaning}</strong>
+            <em>{item.item_type === "connector" ? "Connector" : `WK ${item.wk_level} · ${item.srs_category}`}</em>
+            {item.examples.length > 0 ? <small>{item.examples[0]}</small> : <small>No WaniKani example sentence.</small>}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function SentenceView({
+  audioState,
+  level,
+  profile,
+  revealedTranslations,
+  sentences,
+  showReadings,
+  showUnknownWords,
+  onGenerate,
+  onSpeakSentence,
+  onSpeakText,
+  onToggleTranslation,
+}: {
+  audioState: "idle" | "speaking";
+  level: number;
+  profile: WaniKaniProfile | null;
+  revealedTranslations: Set<number>;
+  sentences: Sentence[];
+  showReadings: boolean;
+  showUnknownWords: boolean;
+  onGenerate: () => void;
+  onSpeakSentence: (sentence: Sentence) => void;
+  onSpeakText: (text: string) => void;
+  onToggleTranslation: (sentenceId: number) => void;
+}) {
+  if (sentences.length === 0) {
+    return (
+      <div className="emptyState">
+        <h2>No sentences yet</h2>
+        <p>Load WaniKani, choose selected vocabulary, and generate a set.</p>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <div className="sentenceToolbar">
+        <div>
+          <span className="eyebrow">
+            {profile ? `${profile.username} · level ${profile.level}` : "No profile loaded"}
+          </span>
+          <h2>Generated sentences</h2>
+        </div>
+        <button
+          className="iconButton"
+          type="button"
+          onClick={onGenerate}
+          aria-label="Generate another sentence set"
+          title="Generate another sentence set"
+        >
+          <RefreshCcw size={19} aria-hidden="true" />
+        </button>
+      </div>
+
+      <div className="sentenceStack">
+        {sentences.map((sentence) => (
+          <SentenceBlock
+            key={sentence.id}
+            audioState={audioState}
+            showUnknownWords={showUnknownWords}
+            isTranslationRevealed={revealedTranslations.has(sentence.id)}
+            level={level}
+            sentence={sentence}
+            showReadings={showReadings}
+            onSpeakSentence={onSpeakSentence}
+            onSpeakText={onSpeakText}
+            onToggleTranslation={onToggleTranslation}
+          />
+        ))}
+      </div>
+    </>
+  );
+}
+
+function RecommendationsModal({
+  recommendations,
+  onClose,
+}: {
+  recommendations: RecommendationItem[];
+  onClose: () => void;
+}) {
+  return (
+    <div className="modalBackdrop" role="presentation">
+      <section className="recommendationModal" role="dialog" aria-modal="true" aria-label="Recommended media">
+        <div className="sentenceToolbar">
+          <div>
+            <span className="eyebrow">Recommendations</span>
+            <h2>What to read or watch next</h2>
+          </div>
+          <button className="iconButton" type="button" onClick={onClose} aria-label="Close recommendations">
+            <X size={18} aria-hidden="true" />
+          </button>
+        </div>
+        <div className="recommendationList">
+          {recommendations.map((item) => (
+            <article className="recommendationCard" key={`${item.media_type}-${item.title}`}>
+              <span>{item.media_type}</span>
+              <h3>{item.title}</h3>
+              <p>{item.reason}</p>
+              <em>{item.level_note}</em>
+              {item.free_resource_url ? (
+                <a href={item.free_resource_url} target="_blank" rel="noreferrer">
+                  Free resource
+                </a>
+              ) : null}
+            </article>
+          ))}
+        </div>
+      </section>
+    </div>
   );
 }
 
